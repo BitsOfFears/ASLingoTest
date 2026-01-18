@@ -1,14 +1,8 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from inference_sdk import InferenceHTTPClient
-import tempfile
-import os
+import base64
+import httpx
 import uvicorn
-
-client = InferenceHTTPClient(
-    api_url="https://serverless.roboflow.com",
-    api_key="EJl82I43SEjMuRZjnl89",
-)
 
 app = FastAPI(title="ASL Practice API")
 
@@ -44,14 +38,15 @@ def extract_letter(result):
 async def asl_infer(image: UploadFile = File(...)):
     try:
         contents = await image.read()
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-            tmp.write(contents)
-            tmp_path = tmp.name
-        try:
-            result = client.infer(tmp_path, model_id="asl-ixq1x/3")
-        finally:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
+        encoded = base64.b64encode(contents).decode("utf-8")
+        url = "https://detect.roboflow.com/asl-ixq1x/3"
+        params = {"api_key": "EJl82I43SEjMuRZjnl89"}
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, params=params, content=encoded, headers=headers)
+        if response.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Upstream error {response.status_code}")
+        result = response.json()
         letter = extract_letter(result)
         return {"letter": letter, "raw": result}
     except Exception as exc:
@@ -60,4 +55,3 @@ async def asl_infer(image: UploadFile = File(...)):
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
-
